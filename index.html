@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sladd – slå sammen og sladd PDF-er lokalt</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<style>
+  :root {
+    --blue: #00509e;
+    --blue-dark: #003b73;
+    --gray-50: #f7f8fa;
+    --gray-100: #eef1f5;
+    --gray-200: #dfe4ea;
+    --gray-400: #9aa5b1;
+    --gray-600: #5c6773;
+    --gray-900: #1f2933;
+    --success: #1e7e34;
+    --success-bg: #e6f4ea;
+    --danger: #c0392b;
+    --danger-bg: #fdecea;
+    --white: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--gray-50);
+    color: var(--gray-900);
+  }
+  header.app-header {
+    background: var(--blue);
+    color: white;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  header.app-header h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 600;
+  }
+  header.app-header .subtitle {
+    font-size: 0.85rem;
+    opacity: 0.85;
+    margin-top: 0.15rem;
+  }
+  .security-banner {
+    background: var(--success-bg);
+    color: var(--success);
+    border: 1px solid #b7e1c2;
+    padding: 0.65rem 1.5rem;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .security-banner svg { flex-shrink: 0; width: 18px; height: 18px; }
+  nav.tabs {
+    display: flex;
+    background: white;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 1.5rem;
+  }
+  nav.tabs button {
+    background: none;
+    border: none;
+    padding: 0.9rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--gray-600);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+  }
+  nav.tabs button.active {
+    color: var(--blue);
+    border-bottom-color: var(--blue);
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 1.5rem; }
+  .panel {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .panel h2 { margin-top: 0; font-size: 1.1rem; }
+  .dropzone {
+    border: 2px dashed var(--gray-400);
+    border-radius: 8px;
+    padding: 2rem;
+    text-align: center;
+    color: var(--gray-600);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .dropzone.dragover {
+    background: var(--gray-100);
+    border-color: var(--blue);
+    color: var(--blue);
+  }
+  .dropzone input { display: none; }
+  ul.file-list {
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+  }
+  ul.file-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    background: var(--gray-50);
+  }
+  ul.file-list li.dragging { opacity: 0.4; }
+  ul.file-list .file-name {
+    flex: 1;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  ul.file-list .file-pages {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+    white-space: nowrap;
+  }
+  ul.file-list button.icon-btn {
+    border: 1px solid var(--gray-200);
+    background: white;
+    border-radius: 5px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: var(--gray-600);
+  }
+  ul.file-list button.icon-btn:hover { background: var(--gray-100); }
+  ul.file-list button.icon-btn:disabled { opacity: 0.35; cursor: default; }
+  ul.file-list button.icon-btn.danger { color: var(--danger); }
+  .btn {
+    background: var(--blue);
+    color: white;
+    border: none;
+    padding: 0.65rem 1.3rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--blue-dark); }
+  .btn:disabled { background: var(--gray-400); cursor: default; }
+  .btn.secondary {
+    background: white;
+    color: var(--blue);
+    border: 1px solid var(--blue);
+  }
+  .btn.secondary:hover { background: var(--gray-100); }
+  .btn.small { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
+  .actions-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .banner {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    margin-top: 1rem;
+  }
+  .banner.success { background: var(--success-bg); color: var(--success); border: 1px solid #b7e1c2; }
+  .banner.danger { background: var(--danger-bg); color: var(--danger); border: 1px solid #f1c1ba; }
+  .banner.info { background: var(--gray-100); color: var(--gray-600); border: 1px solid var(--gray-200); }
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--gray-200);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: -3px;
+    margin-right: 0.4rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .editor-toolbar .page-indicator {
+    font-size: 0.9rem;
+    color: var(--gray-600);
+    min-width: 6.5rem;
+    text-align: center;
+  }
+  .canvas-wrap {
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    overflow: auto;
+    background: var(--gray-100);
+    display: flex;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .canvas-stack { position: relative; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+  .canvas-stack canvas { display: block; }
+  .canvas-stack canvas.overlay { position: absolute; top: 0; left: 0; cursor: crosshair; }
+  .hint { font-size: 0.8rem; color: var(--gray-600); margin-top: 0.5rem; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div>
+    <h1>Sladd</h1>
+    <div class="subtitle">Slå sammen og sladd PDF-dokumenter – helt lokalt i nettleseren</div>
+  </div>
+</header>
+
+<div class="security-banner">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/></svg>
+  <span>Ingen filer sendes over internett. Alt prosesseres 100% lokalt i din nettleser (GDPR-sikker).</span>
+</div>
+
+<nav class="tabs">
+  <button id="tab-merge" class="active">Slå sammen PDF</button>
+  <button id="tab-redact">Sikker sladding</button>
+</nav>
+
+<main>
+
+  <!-- ===================== FEATURE 1: MERGE ===================== -->
+  <section id="view-merge">
+    <div class="panel">
+      <h2>Last opp PDF-filer</h2>
+      <div class="dropzone" id="dropzone">
+        <p>Dra og slipp PDF-filer her, eller klikk for å velge filer</p>
+        <input type="file" id="file-input" accept=".pdf,application/pdf" multiple>
+      </div>
+      <ul class="file-list" id="file-list"></ul>
+      <div class="actions-row">
+        <button class="btn" id="btn-merge" disabled>Slå sammen</button>
+        <span id="merge-status"></span>
+      </div>
+      <div id="merge-banner"></div>
+    </div>
+  </section>
+
+  <!-- ===================== FEATURE 2: REDACT ===================== -->
+  <section id="view-redact" class="hidden">
+    <div class="panel" id="redact-load-panel">
+      <h2>Last inn PDF for sladding</h2>
+      <div class="dropzone" id="dropzone-redact">
+        <p>Dra og slipp én PDF-fil her, eller klikk for å velge fil</p>
+        <input type="file" id="file-input-redact" accept=".pdf,application/pdf">
+      </div>
+      <div id="redact-load-banner"></div>
+    </div>
+
+    <div class="panel hidden" id="redact-editor-panel">
+      <h2>Marker sladdefelt</h2>
+      <div class="editor-toolbar">
+        <button class="btn secondary small" id="btn-prev-page">‹ Forrige</button>
+        <span class="page-indicator" id="page-indicator">Side 1 av 1</span>
+        <button class="btn secondary small" id="btn-next-page">Neste ›</button>
+        <button class="btn secondary small" id="btn-clear-page">Fjern alle sladder</button>
+        <button class="btn" id="btn-export" style="margin-left:auto;">Eksporter sikker PDF</button>
+      </div>
+      <div class="canvas-wrap">
+        <div class="canvas-stack">
+          <canvas id="pdf-canvas"></canvas>
+          <canvas id="overlay-canvas" class="overlay"></canvas>
+        </div>
+      </div>
+      <p class="hint">Klikk og dra med musen over dokumentet for å tegne en svart sladdeboks. Sladdeboksene bakes permanent inn i pikslene ved eksport.</p>
+      <div id="export-banner"></div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const { PDFDocument } = PDFLib;
+
+// ---------------------------------------------------------------
+// Shared app state
+// ---------------------------------------------------------------
+const state = {
+  mergeFiles: [],       // [{ name, bytes, numPages }]
+  redactBytes: null,    // Uint8Array of PDF currently loaded in the redactor
+  redactDoc: null,      // pdf.js document proxy
+  currentPage: 1,
+  numPages: 0,
+  boxesByPage: new Map(), // pageNumber -> [{x,y,w,h}] in PDF point space
+  renderScale: 1,
+};
+
+function bannerHtml(kind, message) {
+  return `<div class="banner ${kind}">${message}</div>`;
+}
+
+// =================================================================
+// Tab switching
+// =================================================================
+const tabMerge = document.getElementById('tab-merge');
+const tabRedact = document.getElementById('tab-redact');
+const viewMerge = document.getElementById('view-merge');
+const viewRedact = document.getElementById('view-redact');
+
+tabMerge.addEventListener('click', () => switchTab('merge'));
+tabRedact.addEventListener('click', () => switchTab('redact'));
+
+function switchTab(name) {
+  const isMerge = name === 'merge';
+  tabMerge.classList.toggle('active', isMerge);
+  tabRedact.classList.toggle('active', !isMerge);
+  viewMerge.classList.toggle('hidden', !isMerge);
+  viewRedact.classList.toggle('hidden', isMerge);
+}
+
+// =================================================================
+// FEATURE 1 — MERGE
+// =================================================================
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file-input');
+const fileListEl = document.getElementById('file-list');
+const btnMerge = document.getElementById('btn-merge');
+const mergeStatus = document.getElementById('merge-status');
+const mergeBanner = document.getElementById('merge-banner');
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => handleNewFiles(fileInput.files));
+
+['dragover', 'dragenter'].forEach(evt => {
+  dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+});
+['dragleave', 'drop'].forEach(evt => {
+  dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.remove('dragover'); });
+});
+dropzone.addEventListener('drop', e => handleNewFiles(e.dataTransfer.files));
+
+async function handleNewFiles(fileListObj) {
+  mergeBanner.innerHTML = '';
+  const files = Array.from(fileListObj).filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if (files.length === 0 && fileListObj.length > 0) {
+    mergeBanner.innerHTML = bannerHtml('danger', 'Ingen av de valgte filene er gyldige PDF-filer.');
+    return;
+  }
+  for (const file of files) {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      state.mergeFiles.push({ name: file.name, bytes, numPages: doc.numPages });
+    } catch (err) {
+      mergeBanner.innerHTML += bannerHtml('danger', `Kunne ikke lese "${escapeHtml(file.name)}". Filen kan være skadet eller ikke en gyldig PDF.`);
+    }
+  }
+  fileInput.value = '';
+  renderFileList();
+}
+
+function renderFileList() {
+  fileListEl.innerHTML = '';
+  state.mergeFiles.forEach((f, i) => {
+    const li = document.createElement('li');
+    li.draggable = true;
+    li.dataset.index = i;
+    li.innerHTML = `
+      <span class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+      <span class="file-pages">${f.numPages} side${f.numPages === 1 ? '' : 'r'}</span>
+      <button class="icon-btn" data-action="up" ${i === 0 ? 'disabled' : ''} title="Flytt opp">▲</button>
+      <button class="icon-btn" data-action="down" ${i === state.mergeFiles.length - 1 ? 'disabled' : ''} title="Flytt ned">▼</button>
+      <button class="icon-btn danger" data-action="delete" title="Fjern">✕</button>
+    `;
+    li.addEventListener('dragstart', () => li.classList.add('dragging'));
+    li.addEventListener('dragend', () => { li.classList.remove('dragging'); renderFileList(); });
+    li.addEventListener('dragover', e => {
+      e.preventDefault();
+      const dragging = fileListEl.querySelector('.dragging');
+      if (!dragging || dragging === li) return;
+      const rect = li.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      fileListEl.insertBefore(dragging, before ? li : li.nextSibling);
+    });
+    li.querySelector('[data-action="up"]')?.addEventListener('click', () => moveFile(i, -1));
+    li.querySelector('[data-action="down"]')?.addEventListener('click', () => moveFile(i, 1));
+    li.querySelector('[data-action="delete"]')?.addEventListener('click', () => deleteFile(i));
+    fileListEl.appendChild(li);
+  });
+
+  // Reconcile order after native drag-and-drop reordering
+  fileListEl.addEventListener('drop', () => {
+    const newOrder = Array.from(fileListEl.children).map(li => state.mergeFiles[Number(li.dataset.index)]);
+    state.mergeFiles = newOrder;
+    renderFileList();
+  }, { once: true });
+
+  btnMerge.disabled = state.mergeFiles.length < 1;
+}
+
+function moveFile(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= state.mergeFiles.length) return;
+  [state.mergeFiles[index], state.mergeFiles[target]] = [state.mergeFiles[target], state.mergeFiles[index]];
+  renderFileList();
+}
+
+function deleteFile(index) {
+  state.mergeFiles.splice(index, 1);
+  renderFileList();
+}
+
+btnMerge.addEventListener('click', mergePdfs);
+
+async function mergePdfs() {
+  if (state.mergeFiles.length === 0) return;
+  mergeBanner.innerHTML = '';
+  btnMerge.disabled = true;
+  mergeStatus.innerHTML = '<span class="spinner"></span>Slår sammen dokumenter…';
+  try {
+    const mergedDoc = await PDFDocument.create();
+    for (const f of state.mergeFiles) {
+      const src = await PDFDocument.load(f.bytes, { ignoreEncryption: true });
+      const pages = await mergedDoc.copyPages(src, src.getPageIndices());
+      pages.forEach(p => mergedDoc.addPage(p));
+    }
+    const mergedBytes = await mergedDoc.save();
+    downloadBytes(mergedBytes, 'sammenslatt.pdf');
+    state.redactBytes = mergedBytes;
+    mergeStatus.textContent = '';
+    mergeBanner.innerHTML = bannerHtml('success', `Sammenslåing fullført! ${mergedDoc.getPageCount()} sider totalt. Filen er lastet ned.`) +
+      `<div class="actions-row"><button class="btn secondary" id="btn-continue-redact">Fortsett til sladding →</button></div>`;
+    document.getElementById('btn-continue-redact').addEventListener('click', async () => {
+      switchTab('redact');
+      await loadRedactBytes(state.redactBytes.slice());
+    });
+  } catch (err) {
+    mergeBanner.innerHTML = bannerHtml('danger', 'Klarte ikke å slå sammen PDF-ene. Kontroller at filene ikke er skadet eller passordbeskyttet.');
+    console.error(err);
+  } finally {
+    mergeStatus.innerHTML = '';
+    btnMerge.disabled = state.mergeFiles.length < 1;
+  }
+}
+
+function downloadBytes(bytes, filename) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// =================================================================
+// FEATURE 2 — REDACT
+// =================================================================
+const dropzoneRedact = document.getElementById('dropzone-redact');
+const fileInputRedact = document.getElementById('file-input-redact');
+const redactLoadBanner = document.getElementById('redact-load-banner');
+const redactEditorPanel = document.getElementById('redact-editor-panel');
+const pdfCanvas = document.getElementById('pdf-canvas');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const pageIndicator = document.getElementById('page-indicator');
+const btnPrevPage = document.getElementById('btn-prev-page');
+const btnNextPage = document.getElementById('btn-next-page');
+const btnClearPage = document.getElementById('btn-clear-page');
+const btnExport = document.getElementById('btn-export');
+const exportBanner = document.getElementById('export-banner');
+
+dropzoneRedact.addEventListener('click', () => fileInputRedact.click());
+fileInputRedact.addEventListener('change', async () => {
+  const file = fileInputRedact.files[0];
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  fileInputRedact.value = '';
+  await loadRedactBytes(bytes);
+});
+['dragover', 'dragenter'].forEach(evt => {
+  dropzoneRedact.addEventListener(evt, e => { e.preventDefault(); dropzoneRedact.classList.add('dragover'); });
+});
+['dragleave', 'drop'].forEach(evt => {
+  dropzoneRedact.addEventListener(evt, e => { e.preventDefault(); dropzoneRedact.classList.remove('dragover'); });
+});
+dropzoneRedact.addEventListener('drop', async e => {
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  await loadRedactBytes(bytes);
+});
+
+async function loadRedactBytes(bytes) {
+  redactLoadBanner.innerHTML = '<div class="banner info"><span class="spinner"></span>Laster dokument…</div>';
+  try {
+    const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    state.redactDoc = doc;
+    state.redactBytes = bytes;
+    state.numPages = doc.numPages;
+    state.currentPage = 1;
+    state.boxesByPage = new Map();
+    redactLoadBanner.innerHTML = '';
+    redactEditorPanel.classList.remove('hidden');
+    await renderCurrentPage();
+  } catch (err) {
+    redactLoadBanner.innerHTML = bannerHtml('danger', 'Kunne ikke lese PDF-filen. Filen kan være skadet, passordbeskyttet eller ugyldig.');
+    console.error(err);
+  }
+}
+
+async function renderCurrentPage() {
+  const page = await state.redactDoc.getPage(state.currentPage);
+  const containerWidth = Math.min(900, document.querySelector('.canvas-wrap').clientWidth - 32 || 900);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.max(0.5, containerWidth / baseViewport.width);
+  state.renderScale = scale;
+  const viewport = page.getViewport({ scale });
+
+  pdfCanvas.width = viewport.width;
+  pdfCanvas.height = viewport.height;
+  overlayCanvas.width = viewport.width;
+  overlayCanvas.height = viewport.height;
+
+  const ctx = pdfCanvas.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  redrawOverlay();
+  pageIndicator.textContent = `Side ${state.currentPage} av ${state.numPages}`;
+  btnPrevPage.disabled = state.currentPage <= 1;
+  btnNextPage.disabled = state.currentPage >= state.numPages;
+}
+
+function redrawOverlay() {
+  const ctx = overlayCanvas.getContext('2d');
+  ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  ctx.fillStyle = '#000000';
+  const boxes = state.boxesByPage.get(state.currentPage) || [];
+  for (const b of boxes) {
+    ctx.fillRect(b.x * state.renderScale, b.y * state.renderScale, b.w * state.renderScale, b.h * state.renderScale);
+  }
+}
+
+btnPrevPage.addEventListener('click', async () => {
+  if (state.currentPage > 1) { state.currentPage--; await renderCurrentPage(); }
+});
+btnNextPage.addEventListener('click', async () => {
+  if (state.currentPage < state.numPages) { state.currentPage++; await renderCurrentPage(); }
+});
+btnClearPage.addEventListener('click', () => {
+  state.boxesByPage.set(state.currentPage, []);
+  redrawOverlay();
+});
+
+// --- Drawing redaction boxes ---
+let drawing = null; // {startX, startY}
+
+overlayCanvas.addEventListener('mousedown', e => {
+  const rect = overlayCanvas.getBoundingClientRect();
+  drawing = { startX: e.clientX - rect.left, startY: e.clientY - rect.top };
+});
+overlayCanvas.addEventListener('mousemove', e => {
+  if (!drawing) return;
+  const rect = overlayCanvas.getBoundingClientRect();
+  const curX = e.clientX - rect.left;
+  const curY = e.clientY - rect.top;
+  redrawOverlay();
+  const ctx = overlayCanvas.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(
+    Math.min(drawing.startX, curX), Math.min(drawing.startY, curY),
+    Math.abs(curX - drawing.startX), Math.abs(curY - drawing.startY)
+  );
+});
+window.addEventListener('mouseup', e => {
+  if (!drawing) return;
+  const rect = overlayCanvas.getBoundingClientRect();
+  const curX = Math.max(0, Math.min(overlayCanvas.width, e.clientX - rect.left));
+  const curY = Math.max(0, Math.min(overlayCanvas.height, e.clientY - rect.top));
+  const x = Math.min(drawing.startX, curX);
+  const y = Math.min(drawing.startY, curY);
+  const w = Math.abs(curX - drawing.startX);
+  const h = Math.abs(curY - drawing.startY);
+  drawing = null;
+  if (w < 4 || h < 4) { redrawOverlay(); return; }
+  const scale = state.renderScale;
+  const pageBoxes = state.boxesByPage.get(state.currentPage) || [];
+  pageBoxes.push({ x: x / scale, y: y / scale, w: w / scale, h: h / scale });
+  state.boxesByPage.set(state.currentPage, pageBoxes);
+  redrawOverlay();
+});
+
+// --- Export: rasterize + bake redactions + strip everything else ---
+const EXPORT_SCALE = 3.0;
+
+btnExport.addEventListener('click', exportSecurePdf);
+
+async function exportSecurePdf() {
+  exportBanner.innerHTML = '';
+  btnExport.disabled = true;
+  try {
+    const outDoc = await PDFDocument.create();
+    for (let pageNum = 1; pageNum <= state.numPages; pageNum++) {
+      exportBanner.innerHTML = `<div class="banner info"><span class="spinner"></span>Rendrer side ${pageNum} av ${state.numPages}…</div>`;
+      // yield to the UI so progress text actually paints
+      await new Promise(r => setTimeout(r, 0));
+
+      const page = await state.redactDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: EXPORT_SCALE });
+
+      const off = document.createElement('canvas');
+      off.width = viewport.width;
+      off.height = viewport.height;
+      const ctx = off.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      ctx.fillStyle = '#000000';
+      const boxes = state.boxesByPage.get(pageNum) || [];
+      for (const b of boxes) {
+        ctx.fillRect(b.x * EXPORT_SCALE, b.y * EXPORT_SCALE, b.w * EXPORT_SCALE, b.h * EXPORT_SCALE);
+      }
+
+      const jpegDataUrl = off.toDataURL('image/jpeg', 0.85);
+      const jpegBytes = dataUrlToBytes(jpegDataUrl);
+      const jpegImage = await outDoc.embedJpg(jpegBytes);
+
+      const pageWidthPt = off.width / EXPORT_SCALE;
+      const pageHeightPt = off.height / EXPORT_SCALE;
+      const outPage = outDoc.addPage([pageWidthPt, pageHeightPt]);
+      outPage.drawImage(jpegImage, { x: 0, y: 0, width: pageWidthPt, height: pageHeightPt });
+    }
+
+    const outBytes = await outDoc.save();
+    downloadBytes(outBytes, 'sladdet-dokument.pdf');
+    exportBanner.innerHTML = bannerHtml('success', 'Sikker PDF eksportert! Dokumentet er rasterisert og all opprinnelig tekst, sladdede piksler og metadata er permanent fjernet.');
+  } catch (err) {
+    exportBanner.innerHTML = bannerHtml('danger', 'Klarte ikke å eksportere dokumentet. Prøv igjen, eller last inn PDF-en på nytt.');
+    console.error(err);
+  } finally {
+    btnExport.disabled = false;
+  }
+}
+
+function dataUrlToBytes(dataUrl) {
+  const base64 = dataUrl.split(',')[1];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+</script>
+
+</body>
+</html>
