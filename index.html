@@ -200,11 +200,32 @@
     flex-wrap: wrap;
     margin-bottom: 1rem;
   }
-  .editor-toolbar .page-indicator {
+  .editor-toolbar #pages-summary {
     font-size: 0.9rem;
     color: var(--gray-600);
-    min-width: 6.5rem;
-    text-align: center;
+  }
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.9rem;
+    padding-bottom: 0.9rem;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .search-bar input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+  .search-bar input[type="text"]:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+  .search-result-count {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+    white-space: nowrap;
   }
   .canvas-wrap {
     border: 1px solid var(--gray-200);
@@ -215,9 +236,29 @@
     justify-content: center;
     padding: 1rem;
   }
+  .canvas-wrap.multipage {
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    max-height: 75vh;
+    gap: 1.5rem;
+  }
+  .page-block { display: flex; flex-direction: column; align-items: center; }
+  .page-block-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--gray-600);
+  }
   .canvas-stack { position: relative; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
   .canvas-stack canvas { display: block; }
-  .canvas-stack canvas.overlay { position: absolute; top: 0; left: 0; cursor: crosshair; }
+  .canvas-stack canvas.overlay { position: absolute; top: 0; left: 0; }
+  .canvas-stack canvas.overlay-canvas { cursor: crosshair; }
+  .canvas-stack canvas.search-canvas { pointer-events: none; }
   .hint { font-size: 0.8rem; color: var(--gray-600); margin-top: 0.5rem; }
   .hidden { display: none !important; }
 </style>
@@ -273,20 +314,19 @@
 
     <div class="panel hidden" id="redact-editor-panel">
       <h2>Marker sladdefelt</h2>
+      <div class="search-bar">
+        <input type="text" id="search-input" placeholder="Søk etter nøkkelord i dokumentet …">
+        <button class="btn secondary small" id="btn-search">Søk</button>
+        <span class="search-result-count" id="search-count"></span>
+        <button class="btn secondary small" id="btn-prev-match" disabled>‹ Forrige treff</button>
+        <button class="btn secondary small" id="btn-next-match" disabled>Neste treff ›</button>
+      </div>
       <div class="editor-toolbar">
-        <button class="btn secondary small" id="btn-prev-page">‹ Forrige</button>
-        <span class="page-indicator" id="page-indicator">Side 1 av 1</span>
-        <button class="btn secondary small" id="btn-next-page">Neste ›</button>
-        <button class="btn secondary small" id="btn-clear-page">Fjern alle sladder</button>
+        <span id="pages-summary">Laster dokument …</span>
         <button class="btn" id="btn-export" style="margin-left:auto;">Eksporter sikker PDF</button>
       </div>
-      <div class="canvas-wrap">
-        <div class="canvas-stack">
-          <canvas id="pdf-canvas"></canvas>
-          <canvas id="overlay-canvas" class="overlay"></canvas>
-        </div>
-      </div>
-      <p class="hint">Klikk og dra med musen over dokumentet for å tegne en svart sladdeboks. Sladdeboksene bakes permanent inn i pikslene ved eksport.</p>
+      <div class="canvas-wrap multipage" id="pages-container"></div>
+      <p class="hint">Klikk og dra med musen over en side for å tegne en svart sladdeboks. Bruk søkefeltet over for å raskt finne nøkkelord som skal sladdes – treff markeres med gult, men sladdes ikke automatisk. Sladdeboksene bakes permanent inn i pikslene ved eksport.</p>
       <div id="export-banner"></div>
     </div>
   </section>
@@ -304,10 +344,11 @@ const state = {
   mergeFiles: [],       // [{ name, bytes, numPages }]
   redactBytes: null,    // Uint8Array of PDF currently loaded in the redactor
   redactDoc: null,      // pdf.js document proxy
-  currentPage: 1,
   numPages: 0,
-  boxesByPage: new Map(), // pageNumber -> [{x,y,w,h}] in PDF point space
-  renderScale: 1,
+  boxesByPage: new Map(), // pageNumber -> [{x,y,w,h}] in PDF point space (top-down, at scale 1)
+  pageInfos: [],          // [{ pageNum, scale, viewport, overlayCanvasEl, searchCanvasEl, textContent }]
+  searchMatches: [],      // [{ pageNum, x, y, w, h }] from the last keyword search
+  searchMatchIndex: -1,
 };
 
 function bannerHtml(kind, message) {
@@ -483,14 +524,15 @@ const dropzoneRedact = document.getElementById('dropzone-redact');
 const fileInputRedact = document.getElementById('file-input-redact');
 const redactLoadBanner = document.getElementById('redact-load-banner');
 const redactEditorPanel = document.getElementById('redact-editor-panel');
-const pdfCanvas = document.getElementById('pdf-canvas');
-const overlayCanvas = document.getElementById('overlay-canvas');
-const pageIndicator = document.getElementById('page-indicator');
-const btnPrevPage = document.getElementById('btn-prev-page');
-const btnNextPage = document.getElementById('btn-next-page');
-const btnClearPage = document.getElementById('btn-clear-page');
+const pagesContainer = document.getElementById('pages-container');
+const pagesSummary = document.getElementById('pages-summary');
 const btnExport = document.getElementById('btn-export');
 const exportBanner = document.getElementById('export-banner');
+const searchInput = document.getElementById('search-input');
+const btnSearch = document.getElementById('btn-search');
+const searchCount = document.getElementById('search-count');
+const btnPrevMatch = document.getElementById('btn-prev-match');
+const btnNextMatch = document.getElementById('btn-next-match');
 
 dropzoneRedact.addEventListener('click', () => fileInputRedact.click());
 fileInputRedact.addEventListener('change', async () => {
@@ -520,97 +562,224 @@ async function loadRedactBytes(bytes) {
     state.redactDoc = doc;
     state.redactBytes = bytes;
     state.numPages = doc.numPages;
-    state.currentPage = 1;
     state.boxesByPage = new Map();
+    state.pageInfos = [];
+    state.searchMatches = [];
+    state.searchMatchIndex = -1;
     redactLoadBanner.innerHTML = '';
     redactEditorPanel.classList.remove('hidden');
-    await renderCurrentPage();
+    searchInput.value = '';
+    searchCount.textContent = '';
+    btnPrevMatch.disabled = true;
+    btnNextMatch.disabled = true;
+    await renderAllPages();
   } catch (err) {
     redactLoadBanner.innerHTML = bannerHtml('danger', 'Kunne ikke lese PDF-filen. Filen kan være skadet, passordbeskyttet eller ugyldig.');
     console.error(err);
   }
 }
 
-async function renderCurrentPage() {
-  const page = await state.redactDoc.getPage(state.currentPage);
-  const containerWidth = Math.min(900, document.querySelector('.canvas-wrap').clientWidth - 32 || 900);
-  const baseViewport = page.getViewport({ scale: 1 });
-  const scale = Math.max(0.5, containerWidth / baseViewport.width);
-  state.renderScale = scale;
-  const viewport = page.getViewport({ scale });
+// --- Render every page into its own canvas stack (continuous scroll view) ---
+async function renderAllPages() {
+  pagesContainer.innerHTML = '';
+  state.pageInfos = [];
+  for (let pageNum = 1; pageNum <= state.numPages; pageNum++) {
+    pagesSummary.innerHTML = `<span class="spinner"></span>Rendrer side ${pageNum} av ${state.numPages}…`;
+    await new Promise(r => setTimeout(r, 0)); // let progress text paint
 
-  pdfCanvas.width = viewport.width;
-  pdfCanvas.height = viewport.height;
-  overlayCanvas.width = viewport.width;
-  overlayCanvas.height = viewport.height;
+    const page = await state.redactDoc.getPage(pageNum);
+    const containerWidth = Math.min(900, pagesContainer.clientWidth - 32 || 900);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = Math.max(0.5, containerWidth / baseViewport.width);
+    const viewport = page.getViewport({ scale });
 
-  const ctx = pdfCanvas.getContext('2d');
-  await page.render({ canvasContext: ctx, viewport }).promise;
+    const block = document.createElement('div');
+    block.className = 'page-block';
+    block.dataset.page = String(pageNum);
+    block.innerHTML = `
+      <div class="page-block-header">
+        <span>Side ${pageNum} av ${state.numPages}</span>
+        <button class="btn secondary small" data-action="clear-page" data-page="${pageNum}">Fjern sladd på denne siden</button>
+      </div>
+      <div class="canvas-stack">
+        <canvas class="pdf-canvas"></canvas>
+        <canvas class="overlay-canvas overlay"></canvas>
+        <canvas class="search-canvas overlay"></canvas>
+      </div>
+    `;
+    pagesContainer.appendChild(block);
 
-  redrawOverlay();
-  pageIndicator.textContent = `Side ${state.currentPage} av ${state.numPages}`;
-  btnPrevPage.disabled = state.currentPage <= 1;
-  btnNextPage.disabled = state.currentPage >= state.numPages;
+    const pdfCanvasEl = block.querySelector('.pdf-canvas');
+    const overlayCanvasEl = block.querySelector('.overlay-canvas');
+    const searchCanvasEl = block.querySelector('.search-canvas');
+    for (const c of [pdfCanvasEl, overlayCanvasEl, searchCanvasEl]) {
+      c.width = viewport.width;
+      c.height = viewport.height;
+    }
+
+    await page.render({ canvasContext: pdfCanvasEl.getContext('2d'), viewport }).promise;
+    const textContent = await page.getTextContent();
+
+    state.pageInfos[pageNum - 1] = { pageNum, scale, viewport, overlayCanvasEl, searchCanvasEl, textContent };
+
+    attachDrawingHandlers(pageNum, overlayCanvasEl);
+    redrawOverlayForPage(pageNum);
+
+    block.querySelector('[data-action="clear-page"]').addEventListener('click', () => {
+      state.boxesByPage.set(pageNum, []);
+      redrawOverlayForPage(pageNum);
+    });
+  }
+  pagesSummary.textContent = `${state.numPages} side${state.numPages === 1 ? '' : 'r'} lastet`;
 }
 
-function redrawOverlay() {
-  const ctx = overlayCanvas.getContext('2d');
-  ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+function getPageInfo(pageNum) {
+  return state.pageInfos[pageNum - 1];
+}
+
+function redrawOverlayForPage(pageNum) {
+  const info = getPageInfo(pageNum);
+  if (!info) return;
+  const ctx = info.overlayCanvasEl.getContext('2d');
+  ctx.clearRect(0, 0, info.overlayCanvasEl.width, info.overlayCanvasEl.height);
   ctx.fillStyle = '#000000';
-  const boxes = state.boxesByPage.get(state.currentPage) || [];
+  const boxes = state.boxesByPage.get(pageNum) || [];
   for (const b of boxes) {
-    ctx.fillRect(b.x * state.renderScale, b.y * state.renderScale, b.w * state.renderScale, b.h * state.renderScale);
+    ctx.fillRect(b.x * info.scale, b.y * info.scale, b.w * info.scale, b.h * info.scale);
   }
 }
 
-btnPrevPage.addEventListener('click', async () => {
-  if (state.currentPage > 1) { state.currentPage--; await renderCurrentPage(); }
-});
-btnNextPage.addEventListener('click', async () => {
-  if (state.currentPage < state.numPages) { state.currentPage++; await renderCurrentPage(); }
-});
-btnClearPage.addEventListener('click', () => {
-  state.boxesByPage.set(state.currentPage, []);
-  redrawOverlay();
-});
+// --- Drawing redaction boxes (per page) ---
+let drawing = null; // { pageNum, startX, startY }
 
-// --- Drawing redaction boxes ---
-let drawing = null; // {startX, startY}
+function attachDrawingHandlers(pageNum, overlayCanvasEl) {
+  overlayCanvasEl.addEventListener('mousedown', e => {
+    const rect = overlayCanvasEl.getBoundingClientRect();
+    drawing = { pageNum, startX: e.clientX - rect.left, startY: e.clientY - rect.top };
+  });
+  overlayCanvasEl.addEventListener('mousemove', e => {
+    if (!drawing || drawing.pageNum !== pageNum) return;
+    const rect = overlayCanvasEl.getBoundingClientRect();
+    const curX = e.clientX - rect.left;
+    const curY = e.clientY - rect.top;
+    redrawOverlayForPage(pageNum);
+    const ctx = overlayCanvasEl.getContext('2d');
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(
+      Math.min(drawing.startX, curX), Math.min(drawing.startY, curY),
+      Math.abs(curX - drawing.startX), Math.abs(curY - drawing.startY)
+    );
+  });
+}
 
-overlayCanvas.addEventListener('mousedown', e => {
-  const rect = overlayCanvas.getBoundingClientRect();
-  drawing = { startX: e.clientX - rect.left, startY: e.clientY - rect.top };
-});
-overlayCanvas.addEventListener('mousemove', e => {
-  if (!drawing) return;
-  const rect = overlayCanvas.getBoundingClientRect();
-  const curX = e.clientX - rect.left;
-  const curY = e.clientY - rect.top;
-  redrawOverlay();
-  const ctx = overlayCanvas.getContext('2d');
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(
-    Math.min(drawing.startX, curX), Math.min(drawing.startY, curY),
-    Math.abs(curX - drawing.startX), Math.abs(curY - drawing.startY)
-  );
-});
 window.addEventListener('mouseup', e => {
   if (!drawing) return;
-  const rect = overlayCanvas.getBoundingClientRect();
-  const curX = Math.max(0, Math.min(overlayCanvas.width, e.clientX - rect.left));
-  const curY = Math.max(0, Math.min(overlayCanvas.height, e.clientY - rect.top));
-  const x = Math.min(drawing.startX, curX);
-  const y = Math.min(drawing.startY, curY);
-  const w = Math.abs(curX - drawing.startX);
-  const h = Math.abs(curY - drawing.startY);
+  const { pageNum, startX, startY } = drawing;
+  const info = getPageInfo(pageNum);
   drawing = null;
-  if (w < 4 || h < 4) { redrawOverlay(); return; }
-  const scale = state.renderScale;
-  const pageBoxes = state.boxesByPage.get(state.currentPage) || [];
+  if (!info) return;
+  const rect = info.overlayCanvasEl.getBoundingClientRect();
+  const curX = Math.max(0, Math.min(info.overlayCanvasEl.width, e.clientX - rect.left));
+  const curY = Math.max(0, Math.min(info.overlayCanvasEl.height, e.clientY - rect.top));
+  const x = Math.min(startX, curX);
+  const y = Math.min(startY, curY);
+  const w = Math.abs(curX - startX);
+  const h = Math.abs(curY - startY);
+  if (w < 4 || h < 4) { redrawOverlayForPage(pageNum); return; }
+  const scale = info.scale;
+  const pageBoxes = state.boxesByPage.get(pageNum) || [];
   pageBoxes.push({ x: x / scale, y: y / scale, w: w / scale, h: h / scale });
-  state.boxesByPage.set(state.currentPage, pageBoxes);
-  redrawOverlay();
+  state.boxesByPage.set(pageNum, pageBoxes);
+  redrawOverlayForPage(pageNum);
 });
+
+// --- Keyword search (helper for locating text to redact manually) ---
+// Approximates each match's on-page bounding box from the text item's PDF
+// transform combined with the page viewport, so highlights only need to be
+// "close enough" to point a human at the right spot — the actual redaction
+// box is still drawn by hand.
+function findMatches(query) {
+  const q = query.trim().toLowerCase();
+  const matches = [];
+  if (!q) return matches;
+  for (const info of state.pageInfos) {
+    for (const item of info.textContent.items) {
+      const str = item.str || '';
+      const strLower = str.toLowerCase();
+      const charLen = str.length || 1;
+      let idx = strLower.indexOf(q);
+      while (idx !== -1) {
+        const combined = pdfjsLib.Util.transform(info.viewport.transform, item.transform);
+        const totalWidth = (item.width || 0) * info.scale;
+        const totalHeight = (item.height || 10) * info.scale;
+        const startRatio = idx / charLen;
+        const endRatio = Math.min(1, (idx + q.length) / charLen);
+        const matchXPx = combined[4] + totalWidth * startRatio;
+        const matchWPx = Math.max(4, totalWidth * (endRatio - startRatio));
+        const matchYPx = combined[5] - totalHeight;
+        matches.push({
+          pageNum: info.pageNum,
+          x: matchXPx / info.scale,
+          y: matchYPx / info.scale,
+          w: matchWPx / info.scale,
+          h: totalHeight / info.scale,
+        });
+        idx = strLower.indexOf(q, idx + 1);
+      }
+    }
+  }
+  return matches;
+}
+
+function clearSearchHighlights() {
+  for (const info of state.pageInfos) {
+    const ctx = info.searchCanvasEl.getContext('2d');
+    ctx.clearRect(0, 0, info.searchCanvasEl.width, info.searchCanvasEl.height);
+  }
+}
+
+function drawSearchHighlight(match, active) {
+  const info = getPageInfo(match.pageNum);
+  if (!info) return;
+  const ctx = info.searchCanvasEl.getContext('2d');
+  ctx.fillStyle = active ? 'rgba(255, 87, 34, 0.65)' : 'rgba(255, 193, 7, 0.55)';
+  ctx.fillRect(match.x * info.scale, match.y * info.scale, match.w * info.scale, match.h * info.scale);
+}
+
+function renderAllMatchHighlights() {
+  clearSearchHighlights();
+  state.searchMatches.forEach((m, i) => drawSearchHighlight(m, i === state.searchMatchIndex));
+}
+
+function goToMatch(index) {
+  if (state.searchMatches.length === 0) return;
+  state.searchMatchIndex = (index + state.searchMatches.length) % state.searchMatches.length;
+  renderAllMatchHighlights();
+  const match = state.searchMatches[state.searchMatchIndex];
+  const block = pagesContainer.querySelector(`.page-block[data-page="${match.pageNum}"]`);
+  block?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  searchCount.textContent = `Treff ${state.searchMatchIndex + 1} av ${state.searchMatches.length}`;
+}
+
+function runSearch() {
+  state.searchMatches = findMatches(searchInput.value);
+  state.searchMatchIndex = -1;
+  if (state.searchMatches.length === 0) {
+    clearSearchHighlights();
+    searchCount.textContent = searchInput.value.trim() ? 'Ingen treff' : '';
+    btnPrevMatch.disabled = true;
+    btnNextMatch.disabled = true;
+    return;
+  }
+  btnPrevMatch.disabled = false;
+  btnNextMatch.disabled = false;
+  goToMatch(0);
+}
+
+btnSearch.addEventListener('click', runSearch);
+searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+btnNextMatch.addEventListener('click', () => goToMatch(state.searchMatchIndex + 1));
+btnPrevMatch.addEventListener('click', () => goToMatch(state.searchMatchIndex - 1));
 
 // --- Export: rasterize + bake redactions + strip everything else ---
 const EXPORT_SCALE = 3.0;
